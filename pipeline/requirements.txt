@@ -1,0 +1,5 @@
+# Pipeline-only dependencies (the webapp has its own requirements.txt).
+goodmem==0.1.28
+httpx==0.28.1
+yt-dlp
+youtube-transcript-api

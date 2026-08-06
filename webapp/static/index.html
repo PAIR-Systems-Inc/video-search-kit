@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Search</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #17202a; --muted: #64707d;
+    --accent: #0d7f6e; --accent-soft: #e2f3f0; --border: #e3e7eb;
+    --badge-bg: rgba(0,0,0,.78); --shadow: 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101418; --card: #1a2027; --text: #e8edf2; --muted: #93a1af;
+      --accent: #35b39e; --accent-soft: #12332d; --border: #2a323c;
+      --badge-bg: rgba(0,0,0,.82); --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 20px 80px; }
+  header h1 { font-size: 1.7rem; letter-spacing: -.01em;
+              display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  header p { color: var(--muted); margin-top: 6px; }
+  header .top { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  .stage-tag {
+    font-size: .68rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent);
+    padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  header .top a { color: var(--accent); text-decoration: none; font-size: .86rem;
+                  font-weight: 600; white-space: nowrap; }
+  header .top a:hover { text-decoration: underline; }
+  form { display: flex; gap: 10px; margin: 26px 0 8px; }
+  input[type=search] {
+    flex: 1; padding: 13px 16px; font-size: 1rem; color: var(--text);
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    outline: none;
+  }
+  input[type=search]:focus { border-color: var(--accent); }
+  button {
+    padding: 13px 22px; font-size: 1rem; font-weight: 600; color: #fff;
+    background: var(--accent); border: 0; border-radius: 10px; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  .status { color: var(--muted); font-size: .9rem; min-height: 1.4em; margin-bottom: 14px; }
+  .answer {
+    background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: 14px; box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 22px;
+  }
+  .answer h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
+               color: var(--accent); margin-bottom: 8px; }
+  /* AI summary: collapsed by default, opens only on user action */
+  button.disclose {
+    background: transparent; color: var(--accent); border: 0; border-radius: 0; padding: 0;
+    font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  }
+  button.disclose:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .chev { display: inline-block; transition: transform .18s ease; font-size: .9em; }
+  button.disclose[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .disclose-state { margin-left: auto; color: var(--muted); font-weight: 500;
+                    text-transform: none; letter-spacing: 0; font-size: .82rem; }
+  .disclose-body { margin-top: 12px; }
+  .answer .text { font-size: .97rem; white-space: pre-wrap; }
+  .answer .text sup a { color: var(--accent); text-decoration: none; font-weight: 700; }
+  .answer .srcs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .answer .srcs a {
+    font-size: .78rem; color: var(--accent); background: var(--accent-soft);
+    padding: 3px 10px; border-radius: 20px; text-decoration: none;
+    max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .answer.loading .text { color: var(--muted); }
+  .answer.loading .text::after { content: '…'; animation: dots 1.2s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+  .answer .note { color: var(--muted); font-size: .82rem; margin-top: 8px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden;
+  }
+  .card-body { display: flex; gap: 16px; padding: 16px; }
+  .thumb {
+    position: relative; flex: 0 0 200px; align-self: flex-start; cursor: pointer;
+    border-radius: 10px; overflow: hidden; background: #000;
+  }
+  .thumb img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
+  .thumb .play {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(0,0,0,.15); transition: background .15s;
+  }
+  .thumb:hover .play { background: rgba(0,0,0,.35); }
+  .thumb .play svg { width: 46px; height: 46px; filter: drop-shadow(0 1px 4px rgba(0,0,0,.5)); }
+  .badge {
+    position: absolute; right: 6px; bottom: 6px; padding: 2px 7px;
+    background: var(--badge-bg); color: #fff; font-size: .78rem; border-radius: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .meta { flex: 1; min-width: 0; }
+  .meta h3 { font-size: 1.02rem; line-height: 1.35; }
+  .meta h3 a { color: var(--text); text-decoration: none; }
+  .meta h3 a:hover { color: var(--accent); }
+  .range {
+    display: inline-block; margin: 7px 0 9px; padding: 2px 9px; font-size: .8rem;
+    color: var(--accent); background: var(--accent-soft); border-radius: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .snippet { color: var(--muted); font-size: .92rem;
+             display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+             overflow: hidden; }
+  .snippet.open { display: block; }
+  .actions { margin-top: 10px; display: flex; gap: 14px; font-size: .86rem; }
+  .actions a, .actions span { color: var(--accent); text-decoration: none; cursor: pointer;
+                              font-weight: 600; }
+  .player { aspect-ratio: 16/9; background: #000; }
+  .player iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+  @media (max-width: 620px) {
+    .card-body { flex-direction: column; }
+    .thumb { flex-basis: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="top">
+      <h1><span id="siteName">Video Search</span> <span class="stage-tag" id="stageTag">Alpha</span></h1>
+    </div>
+    <p id="siteTagline">Ask a question — every result links to the exact moment in the video it came from.</p>
+  </header>
+
+  <form id="form">
+    <input id="q" type="search" placeholder="Ask a question…"
+           autocomplete="off" autofocus>
+    <button id="go" type="submit">Search</button>
+  </form>
+  <div class="status" id="status"></div>
+  <div id="answer"></div>
+  <div id="results"></div>
+</div>
+
+<script>
+const form = document.getElementById('form');
+const input = document.getElementById('q');
+const goBtn = document.getElementById('go');
+const statusEl = document.getElementById('status');
+const answerEl = document.getElementById('answer');
+const resultsEl = document.getElementById('results');
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let answerEnabled = true;
+const stageTag = document.getElementById('stageTag');
+fetch('/api/health').then(r => r.json())
+  .then(h => {
+    answerEnabled = !!h.answer_enabled;
+    if (h.version) stageTag.textContent = `${h.stage || 'Alpha'} · v${h.version}`;
+    // Branding comes from the server (.env) so this HTML stays generic.
+    if (h.site_name) {
+      document.getElementById('siteName').textContent = h.site_name;
+      document.title = h.site_name;
+    }
+    if (h.site_tagline) document.getElementById('siteTagline').textContent = h.site_tagline;
+    if (h.example_query) input.placeholder = h.example_query;
+  }).catch(() => {});
+
+let requestSeq = 0;
+
+const fmtMs = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
+
+/* ---- AI summary: a collapsed disclosure above the results. It is generated
+   as soon as results land, but stays closed until the user opens it. ---- */
+function renderAiShell() {
+  answerEl.innerHTML = `<div class="answer">
+      <button class="disclose" aria-expanded="false" aria-controls="aiBody">
+        <span class="chev">▶</span> AI Summary
+        <span class="disclose-state" id="aiState">generating…</span>
+      </button>
+      <div class="disclose-body" id="aiBody" hidden></div>
+    </div>`;
+  answerEl.querySelector('button.disclose').addEventListener('click', toggleAi);
+}
+
+function toggleAi() {
+  const btn = answerEl.querySelector('button.disclose');
+  const body = answerEl.querySelector('#aiBody');
+  if (!btn || !body) return;
+  const open = btn.getAttribute('aria-expanded') !== 'true';
+  btn.setAttribute('aria-expanded', String(open));
+  body.hidden = !open;
+}
+
+function setAiPanel(html, state) {
+  const body = answerEl.querySelector('#aiBody');
+  const st = answerEl.querySelector('#aiState');
+  if (body) body.innerHTML = html;
+  if (st) st.textContent = state || '';
+}
+
+function generateAnswer(q, srcs, seq) {
+  fetch('/api/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q, sources: srcs }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (seq !== requestSeq) return;           // a newer search superseded us
+      if (data.disabled) {          // no summariser configured — drop the control
+        answerEnabled = false;
+        answerEl.innerHTML = '';
+        return;
+      }
+      if (!data.answer) {
+        setAiPanel(`<div class="note">Could not generate a summary${data.error ? ': ' + esc(data.error) : '.'}</div>`,
+                   'unavailable');
+        return;
+      }
+      const cited = new Set();
+      // Citations may be single "[6]" or grouped "[6, 8, 11]" — link each number.
+      const linked = esc(data.answer).replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, grp) => {
+        const parts = grp.split(',').map(x => x.trim()).map(n => {
+          const s = srcs[+n - 1];
+          if (!s) return n;
+          cited.add(+n);
+          const where = s.title_match ? '(full video)' : '@ ' + esc(s.start_label);
+          return `<a href="${esc(s.watch_url)}" target="_blank" rel="noopener"
+                    title="${esc(s.title)} ${where}">${n}</a>`;
+        });
+        return `<sup>[${parts.join(', ')}]</sup>`;
+      });
+      const chipIdx = cited.size ? [...cited].sort((a, b) => a - b)
+                                 : srcs.slice(0, 6).map((_, i) => i + 1);
+      const chips = chipIdx.map(n => {
+        const s = srcs[n - 1];
+        if (!s) return '';
+        const where = s.title_match ? '(full video)' : '@ ' + esc(s.start_label);
+        return `<a href="${esc(s.watch_url)}" target="_blank" rel="noopener">[${n}] ${esc(s.title)} ${where}</a>`;
+      }).join('');
+      setAiPanel(`<div class="text">${linked}</div>
+        <div class="srcs">${chips}</div>
+        <div class="note">AI-generated in ${fmtMs(data.took_ms || 0)} from the results below —
+          verify against the source videos.</div>`, '');
+    })
+    .catch(() => {
+      if (seq !== requestSeq) return;
+      setAiPanel(`<div class="note">Summary unavailable right now (network error) —
+        the results below are unaffected.</div>`, 'unavailable');
+    });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = input.value.trim();
+  if (q.length < 2) return;
+  const seq = ++requestSeq;
+  goBtn.disabled = true;
+  statusEl.textContent = 'Searching…';
+  resultsEl.innerHTML = '';
+  answerEl.innerHTML = '';
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&k=10`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const d = body.detail;
+      const msg = typeof d === 'string' ? d
+        : Array.isArray(d) ? d.map(x => x.msg || JSON.stringify(x)).join('; ')
+        : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    render(data);   // cards appear NOW
+    const items = data.results || [];
+    if (items.length && answerEnabled) {
+      renderAiShell();                 // collapsed control only
+      generateAnswer(q, items, seq);   // fills it in the background, stays closed
+    }
+  } catch (err) {
+    statusEl.textContent = '';
+    resultsEl.innerHTML = `<div class="empty">Search failed: ${esc(err.message)}</div>`;
+  } finally {
+    goBtn.disabled = false;
+  }
+});
+
+function render(data) {
+  const items = data.results || [];
+  statusEl.textContent = items.length
+    ? `${items.length} video${items.length > 1 ? 's' : ''} in ${fmtMs(data.took_ms || 0)}`
+    : '';
+  if (!items.length) {
+    resultsEl.innerHTML = `<div class="empty">No sufficiently relevant videos found for this question —
+      the library may not cover it. Try rephrasing or asking something else.</div>`;
+    return;
+  }
+  resultsEl.innerHTML = items.map((r, i) => {
+    const full = !!r.title_match;
+    const alt = (r.moments || []).length
+      ? `<div class="actions" style="margin-top:6px">Also at: ${r.moments.map(m =>
+          `<a href="${esc(m.watch_url)}" target="_blank" rel="noopener">${esc(m.start_label)}</a>`).join(' · ')}</div>`
+      : '';
+    return `
+    <article class="card" id="card-${i}">
+      <div class="card-body">
+        <div class="thumb" data-i="${i}" title="${full ? 'Play video' : 'Play from ' + esc(r.start_label)}">
+          <img src="${esc(r.thumbnail)}" alt="" loading="lazy"
+               onerror="this.style.visibility='hidden'">
+          <div class="play">
+            <svg viewBox="0 0 24 24"><path fill="#fff" d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+          </div>
+          <span class="badge">${full ? 'Full video' : esc(r.start_label)}</span>
+        </div>
+        <div class="meta">
+          <h3><a href="${esc(r.watch_url)}" target="_blank" rel="noopener">${esc(r.title || r.video_id || 'Untitled video')}</a></h3>
+          ${full
+            ? `<span class="range">Full video</span>`
+            : `<span class="range">${esc(r.start_label)} – ${esc(r.end_label)}</span>`}
+          <p class="snippet" data-i="${i}">${esc(r.text)}</p>
+          <div class="actions">
+            <span data-play="${i}">▶ Play here</span>
+            <a href="${esc(r.watch_url)}" target="_blank" rel="noopener">Watch on YouTube ↗</a>
+            <span data-expand="${i}">Show full text</span>
+          </div>
+          ${alt}
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+
+  resultsEl.querySelectorAll('[data-i].thumb, [data-play]').forEach(el => {
+    el.addEventListener('click', () => play(items, +(el.dataset.i ?? el.dataset.play)));
+  });
+  resultsEl.querySelectorAll('[data-expand]').forEach(el => {
+    el.addEventListener('click', () => {
+      const p = resultsEl.querySelector(`.snippet[data-i="${el.dataset.expand}"]`);
+      const open = p.classList.toggle('open');
+      el.textContent = open ? 'Hide full text' : 'Show full text';
+    });
+  });
+}
+
+function play(items, i) {
+  const r = items[i];
+  if (!r || !r.embed_url) return;
+  // Only one active player at a time.
+  resultsEl.querySelectorAll('.player').forEach(p => p.remove());
+  const card = document.getElementById(`card-${i}`);
+  const holder = document.createElement('div');
+  holder.className = 'player';
+  holder.innerHTML = `<iframe src="${esc(r.embed_url)}" allow="autoplay; encrypted-media"
+                      allowfullscreen title="${esc(r.title)}"></iframe>`;
+  card.prepend(holder);
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+</script>
+</body>
+</html>
