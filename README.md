@@ -71,6 +71,10 @@ python pipeline/transcribe.py                # captions first, Whisper fallback
   `WHISPER_BASE_URL=https://api.groq.com/openai/v1`,
   `WHISPER_MODEL=whisper-large-v3-turbo`). `--whisper-only` / `--captions-only`
   narrow the behaviour.
+- Resumable: re-running skips what's done (`data/transcribe.state.json`).
+- Note: downloading audio from YouTube is generally only appropriate for
+  content you own or have rights to — the intended use is your own channel.
+
 **Why does this need anything installed — isn't transcription an API call?**
 The transcription itself *is* API-side. But the Whisper API accepts an **audio
 file upload, not a URL** — you cannot send it a YouTube link — and YouTube has
@@ -95,9 +99,6 @@ YouTube ──(yt-dlp)──▶ this machine ──(ffmpeg: shrink+split)──�
 
 These are **pipeline-machine dependencies only** — the deployed website needs
 none of them.
-- Resumable: re-running skips what's done (`data/transcribe.state.json`).
-- Note: downloading audio from YouTube is generally only appropriate for
-  content you own or have rights to — the intended use is your own channel.
 
 **Local files instead of YouTube** — transcribe any audio/video files ffmpeg
 can read (MP4, MKV, MP3, WAV, …), no YouTube involved:
