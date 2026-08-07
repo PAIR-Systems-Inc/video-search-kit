@@ -116,49 +116,57 @@ def run(cmd, **kw):
     return p
 
 
+def transcribe_audio_file(src_path: str, cfg: dict, tmp: str) -> dict:
+    """
+    Local media file -> ffmpeg (16kHz mono opus) -> fixed-length pieces (the
+    Whisper API caps uploads at 25 MB) -> Whisper per piece -> stitched
+    canonical dict. Works on any audio/video format ffmpeg can read.
+    """
+    audio = os.path.join(tmp, "audio.ogg")
+    run(["ffmpeg", "-y", "-i", src_path, "-vn", "-ac", "1", "-ar", "16000",
+         "-c:a", "libopus", "-b:a", f"{AUDIO_KBPS}k", audio])
+
+    pieces_dir = os.path.join(tmp, "pieces")
+    os.makedirs(pieces_dir)
+    run(["ffmpeg", "-y", "-i", audio, "-f", "segment",
+         "-segment_time", str(PIECE_SECONDS), "-c", "copy",
+         os.path.join(pieces_dir, "p%04d.ogg")])
+    pieces = sorted(os.listdir(pieces_dir))
+
+    segments, language = [], ""
+    for n, piece in enumerate(pieces):
+        offset = n * PIECE_SECONDS
+        with open(os.path.join(pieces_dir, piece), "rb") as f:
+            resp = httpx.post(
+                f"{cfg['base_url'].rstrip('/')}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {cfg['api_key']}"},
+                data={"model": cfg["model"], "response_format": "verbose_json"},
+                files={"file": (piece, f, "audio/ogg")},
+                timeout=600.0,
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        language = language or body.get("language", "")
+        for s in body.get("segments", []):
+            text = (s.get("text") or "").strip()
+            if text:
+                segments.append({"start": round(offset + s["start"], 2),
+                                 "end": round(offset + s["end"], 2),
+                                 "text": text})
+    if not segments:
+        raise RuntimeError("Whisper returned no segments")
+    return {"language": language, "duration": segments[-1]["end"],
+            "source": "whisper", "segments": segments}
+
+
 def whisper_transcribe(video_id: str, cfg: dict) -> dict:
-    """yt-dlp -> ffmpeg -> (split) -> Whisper API -> stitched canonical dict."""
+    """YouTube video -> yt-dlp audio download -> transcribe_audio_file."""
     with tempfile.TemporaryDirectory(prefix=f"vsk-{video_id}-") as tmp:
         raw = os.path.join(tmp, "raw.m4a")
         run([ytdlp_bin(), "-f", "bestaudio", "-o", raw, "--no-playlist",
              *ytdlp_cookie_args(),
              f"https://www.youtube.com/watch?v={video_id}"])
-        audio = os.path.join(tmp, "audio.ogg")
-        run(["ffmpeg", "-y", "-i", raw, "-vn", "-ac", "1", "-ar", "16000",
-             "-c:a", "libopus", "-b:a", f"{AUDIO_KBPS}k", audio])
-
-        # split into fixed-length pieces so every upload fits the API limit
-        pieces_dir = os.path.join(tmp, "pieces")
-        os.makedirs(pieces_dir)
-        run(["ffmpeg", "-y", "-i", audio, "-f", "segment",
-             "-segment_time", str(PIECE_SECONDS), "-c", "copy",
-             os.path.join(pieces_dir, "p%04d.ogg")])
-        pieces = sorted(os.listdir(pieces_dir))
-
-        segments, language = [], ""
-        for n, piece in enumerate(pieces):
-            offset = n * PIECE_SECONDS
-            with open(os.path.join(pieces_dir, piece), "rb") as f:
-                resp = httpx.post(
-                    f"{cfg['base_url'].rstrip('/')}/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {cfg['api_key']}"},
-                    data={"model": cfg["model"], "response_format": "verbose_json"},
-                    files={"file": (piece, f, "audio/ogg")},
-                    timeout=600.0,
-                )
-            resp.raise_for_status()
-            body = resp.json()
-            language = language or body.get("language", "")
-            for s in body.get("segments", []):
-                text = (s.get("text") or "").strip()
-                if text:
-                    segments.append({"start": round(offset + s["start"], 2),
-                                     "end": round(offset + s["end"], 2),
-                                     "text": text})
-        if not segments:
-            raise RuntimeError("Whisper returned no segments")
-        return {"language": language, "duration": segments[-1]["end"],
-                "source": "whisper", "segments": segments}
+        return transcribe_audio_file(raw, cfg, tmp)
 
 
 # ------------------------------------------------------------------ main
@@ -176,7 +184,45 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--estimate", action="store_true",
                         help="Print an audio-hours/cost estimate and exit")
+    parser.add_argument("--media", nargs="+", metavar="FILE",
+                        help="Transcribe local audio/video file(s) instead of "
+                             "YouTube videos (any format ffmpeg reads). "
+                             "Output id = the filename slug.")
     args = parser.parse_args()
+
+    # ---- local media files: no YouTube involved at all ---------------------
+    if args.media:
+        key = os.environ.get("WHISPER_API_KEY", "").strip()
+        if not key:
+            sys.exit("--media needs WHISPER_API_KEY in .env (an OpenAI key works as-is).")
+        if shutil.which("ffmpeg") is None:
+            sys.exit("ffmpeg not found on PATH — required to prepare audio for the API.")
+        cfg = {"base_url": os.environ.get("WHISPER_BASE_URL", "https://api.openai.com/v1"),
+               "api_key": key,
+               "model": os.environ.get("WHISPER_MODEL", "whisper-1")}
+        os.makedirs(args.out_dir, exist_ok=True)
+        for path in args.media:
+            if not os.path.exists(path):
+                print(f"  SKIP {path}: not found", flush=True)
+                continue
+            import re as _re
+            slug = _re.sub(r"[^0-9A-Za-z_-]+", "_",
+                           os.path.splitext(os.path.basename(path))[0]).strip("_") or "media"
+            out = os.path.join(args.out_dir, f"{slug}.json")
+            if os.path.exists(out):
+                print(f"  SKIP {os.path.basename(path)}: {out} already exists", flush=True)
+                continue
+            print(f"  transcribing {os.path.basename(path)} -> {slug}.json ...", flush=True)
+            with tempfile.TemporaryDirectory(prefix=f"vsk-{slug}-") as tmp:
+                result = transcribe_audio_file(path, cfg, tmp)
+            result["source"] = "whisper-local"
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+            print(f"    {len(result['segments'])} segments, "
+                  f"{result['duration']:.0f}s, language={result['language']}", flush=True)
+        print("Done. Add matching rows to your videos.csv (video_id = the filename "
+              "slug) if you want titles/links on the search cards.")
+        return
 
     with open(args.csv, newline="", encoding="utf-8") as f:
         videos = [r for r in csv.DictReader(f) if r.get("video_id")]

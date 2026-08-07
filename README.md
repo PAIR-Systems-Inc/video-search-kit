@@ -71,12 +71,44 @@ python pipeline/transcribe.py                # captions first, Whisper fallback
   `WHISPER_BASE_URL=https://api.groq.com/openai/v1`,
   `WHISPER_MODEL=whisper-large-v3-turbo`). `--whisper-only` / `--captions-only`
   narrow the behaviour.
-- The Whisper path needs `yt-dlp` and `ffmpeg` on PATH. Long audio is split
-  into 20-minute pieces (the API caps uploads at 25 MB) and the timestamps are
-  stitched back together.
+**Why does this need anything installed — isn't transcription an API call?**
+The transcription itself *is* API-side. But the Whisper API accepts an **audio
+file upload, not a URL** — you cannot send it a YouTube link — and YouTube has
+no API that returns audio (the Data API is metadata-only). So the machine
+running the pipeline is the middleman: it downloads the audio (`yt-dlp`),
+shrinks it to speech-grade mono and splits anything long into 20-minute pieces
+because the API rejects files over 25 MB (`ffmpeg`), uploads the pieces, and
+stitches the timestamped results back together.
+
+```
+YouTube ──(yt-dlp)──▶ this machine ──(ffmpeg: shrink+split)──▶ Whisper API ──▶ transcript
+```
+
+**Install requirements, per path:**
+
+| Path | Needs installed | Needs a key |
+|---|---|---|
+| Captions | nothing | nothing |
+| Whisper (YouTube) | `ffmpeg` (e.g. `sudo apt install ffmpeg`) + `yt-dlp` (pip) | `WHISPER_API_KEY` |
+| Whisper (local files, `--media`) | `ffmpeg` only | `WHISPER_API_KEY` |
+| Bring-your-own transcripts | nothing | nothing |
+
+These are **pipeline-machine dependencies only** — the deployed website needs
+none of them.
 - Resumable: re-running skips what's done (`data/transcribe.state.json`).
 - Note: downloading audio from YouTube is generally only appropriate for
   content you own or have rights to — the intended use is your own channel.
+
+**Local files instead of YouTube** — transcribe any audio/video files ffmpeg
+can read (MP4, MKV, MP3, WAV, …), no YouTube involved:
+
+```bash
+python pipeline/transcribe.py --media path/to/talk.mp4 path/to/interview.mp3
+```
+
+Each file becomes `data/transcripts/<filename-slug>.json`. Add a matching row
+to `videos.csv` (`video_id` = the filename slug) if you want a title on its
+search card.
 
 ## 3. Bring your own transcripts
 
