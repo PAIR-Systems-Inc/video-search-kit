@@ -217,3 +217,7 @@ generated from exactly the shown results and stays collapsed until clicked.
 
 All the knobs (`TITLE_WEIGHT`, `RELEVANCE_FLOOR`, `RETRIEVE_POOL`,
 `CHUNK_WINDOW`, …) live in `.env` with tested defaults.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
