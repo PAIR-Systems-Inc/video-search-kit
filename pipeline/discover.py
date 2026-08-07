@@ -7,11 +7,9 @@ Accepts any of:
   https://www.youtube.com/channel/UCxxxx       UCxxxx
   https://www.youtube.com/playlist?list=PL...  PL...
 
-Two modes:
-  API mode (default)  — official YouTube Data API v3 (set YOUTUBE_API_KEY).
-                        Cheap on quota: 1 unit per 50 videos.
-  --no-api            — yt-dlp enumeration, no key needed (slower, and
-                        publish dates/durations may be missing).
+Requires a (free) YouTube Data API v3 key — set YOUTUBE_API_KEY in .env.
+Get one: Google Cloud Console -> enable "YouTube Data API v3" -> Credentials.
+Cheap on quota: 1 unit per 50 videos (default daily quota is 10,000 units).
 
 Output CSV columns: video_id,title,published_at,url,duration,description
 
@@ -25,7 +23,6 @@ import csv
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
@@ -142,54 +139,17 @@ def discover_api(source: dict, key: str) -> list:
     return videos
 
 
-# ---------------------------------------------------------------- yt-dlp mode
-def discover_ytdlp(src_raw: str) -> list:
-    url = src_raw if "://" in src_raw else (
-        f"https://www.youtube.com/{src_raw}" if src_raw.startswith("@")
-        else f"https://www.youtube.com/channel/{src_raw}")
-    cmd = ["yt-dlp", "--flat-playlist", "-J", url]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    except FileNotFoundError:
-        sys.exit("yt-dlp is not installed — `pip install yt-dlp` or use API mode.")
-    if out.returncode != 0:
-        sys.exit(f"yt-dlp failed: {out.stderr[-400:]}")
-    data = json.loads(out.stdout)
-    entries = data.get("entries") or []
-    # channels come back as sub-playlists (Videos / Shorts / Live) — flatten
-    if entries and entries[0].get("_type") == "playlist":
-        entries = [e for sub in entries for e in (sub.get("entries") or [])]
-    videos = []
-    for e in entries:
-        vid = e.get("id")
-        if not vid:
-            continue
-        videos.append({
-            "video_id": vid,
-            "title": e.get("title", ""),
-            "published_at": "",
-            "url": f"https://www.youtube.com/watch?v={vid}",
-            "duration": e.get("duration") or "",
-            "description": "",
-        })
-    return videos
-
-
 def main():
     parser = argparse.ArgumentParser(description="Channel/playlist -> videos.csv")
     parser.add_argument("source", help="Channel URL, @handle, channel ID, or playlist")
     parser.add_argument("--out", default="data/videos.csv")
-    parser.add_argument("--no-api", action="store_true",
-                        help="Use yt-dlp instead of the YouTube Data API")
     args = parser.parse_args()
 
-    if args.no_api:
-        videos = discover_ytdlp(args.source)
-    else:
-        key = os.environ.get("YOUTUBE_API_KEY", "").strip()
-        if not key:
-            sys.exit("YOUTUBE_API_KEY is not set — set it in .env, or use --no-api.")
-        videos = discover_api(parse_source(args.source), key)
+    key = os.environ.get("YOUTUBE_API_KEY", "").strip()
+    if not key:
+        sys.exit("YOUTUBE_API_KEY is not set — add it to .env (free key: enable "
+                 "'YouTube Data API v3' in Google Cloud Console).")
+    videos = discover_api(parse_source(args.source), key)
 
     if not videos:
         sys.exit("No videos found.")

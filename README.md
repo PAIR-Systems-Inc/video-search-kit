@@ -39,7 +39,7 @@ What goes in `.env` (details in `.env.example`):
 | `RERANKER_API_KEY` (+ model) | registered into GoodMem by setup.py | recommended |
 | `OPENROUTER_API_KEY` (+ model) | the AI summary (any OpenAI-compatible API) | optional |
 | `WHISPER_API_KEY` (+ base URL, model) | transcription | only for transcribe |
-| `YOUTUBE_API_KEY` | channel discovery (API mode) | only for discover |
+| `YOUTUBE_API_KEY` | channel discovery | required for discover |
 
 ## 1. Discover — channel ➜ video list
 
@@ -50,21 +50,12 @@ python pipeline/discover.py "https://www.youtube.com/@SomeChannel"
 
 Writes `data/videos.csv`: `video_id,title,published_at,url,duration,description`.
 
-There are **two modes**:
-
-| | **API mode** (default) | **`--no-api` mode** |
-|---|---|---|
-| Requirement | free `YOUTUBE_API_KEY` ([get one](https://console.cloud.google.com/apis/library/youtube.googleapis.com)) | nothing (uses yt-dlp) |
-| Publish dates | ✅ | ❌ empty |
-| Durations | ✅ (feeds the `--estimate` cost preview) | usually ❌ |
-| Descriptions | ✅ | ❌ |
-| Reliability | official API, stable | scraping-based — can break when YouTube changes, and heavy use may get rate-limited/blocked |
-| Speed | fast (1 quota unit per 50 videos) | slower on large channels |
-
-`--no-api` limitations in practice: cards render without dates, `transcribe.py
---estimate` can't compute audio hours or Whisper cost (no durations), and it's
-the first thing to break when YouTube changes their pages. It's the
-quick-start path; use API mode for anything you'll run repeatedly.
+**Requires a free `YOUTUBE_API_KEY`**
+([get one](https://console.cloud.google.com/apis/library/youtube.googleapis.com):
+enable *YouTube Data API v3* → Credentials → API key, then put it in `.env`).
+Discovery uses the official API only — it's stable, fast (1 quota unit per 50
+videos against a 10,000/day free quota), and returns the publish dates and
+durations that the result cards and the `--estimate` cost preview depend on.
 
 ## 2. Transcribe — videos ➜ timestamped transcripts
 
