@@ -41,6 +41,24 @@ AUDIO_KBPS = 32          # opus mono — ~14 MB/hour, clean enough for ASR
 PIECE_SECONDS = 1200     # 20-min pieces ≈ 5 MB each, well under the 25 MB cap
 
 
+def ytdlp_bin() -> str:
+    """Prefer a yt-dlp installed next to this Python (venv) — YouTube changes
+    constantly and an outdated system-wide yt-dlp fails in confusing ways."""
+    cand = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
+    return cand if os.path.exists(cand) else "yt-dlp"
+
+
+def ytdlp_cookie_args() -> list:
+    """
+    YouTube increasingly answers datacenter/flagged IPs with 'Sign in to
+    confirm you're not a bot'. The standard remedy is to reuse your browser's
+    logged-in session:  set YTDLP_COOKIES_FROM_BROWSER=chrome (or firefox,
+    edge, ...) in .env, with that browser logged into YouTube.
+    """
+    browser = os.environ.get("YTDLP_COOKIES_FROM_BROWSER", "").strip()
+    return ["--cookies-from-browser", browser] if browser else []
+
+
 # ------------------------------------------------------------------ state
 def load_state(path):
     if os.path.exists(path):
@@ -57,26 +75,37 @@ def save_state(state, path):
 
 
 # ------------------------------------------------------------------ captions
+class CaptionFetchBlocked(Exception):
+    """Captions could not be FETCHED (IP block, network) — distinct from a
+    video genuinely having no captions. Must not be silently treated as
+    'no captions' or a blocked IP looks like an entire channel without them."""
+
+
 def try_captions(video_id: str):
-    """Return canonical transcript dict from YouTube captions, or None."""
+    """Canonical transcript dict from YouTube captions; None if the video has
+    none; raises CaptionFetchBlocked when YouTube refuses the request."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api._errors import (
+            NoTranscriptFound, TranscriptsDisabled, VideoUnavailable)
     except ImportError:
         return None
     try:
         fetched = YouTubeTranscriptApi().fetch(video_id)
-        segments = [{"start": round(s.start, 2),
-                     "end": round(s.start + s.duration, 2),
-                     "text": s.text.replace("\n", " ").strip()}
-                    for s in fetched if s.text.strip()]
-        if not segments:
-            return None
-        return {"language": getattr(fetched, "language_code", "") or "",
-                "duration": segments[-1]["end"],
-                "source": "captions",
-                "segments": segments}
-    except Exception:
+    except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable):
+        return None                       # genuinely no captions to be had
+    except Exception as e:
+        raise CaptionFetchBlocked(f"{type(e).__name__}: {str(e)[:150]}")
+    segments = [{"start": round(s.start, 2),
+                 "end": round(s.start + s.duration, 2),
+                 "text": s.text.replace("\n", " ").strip()}
+                for s in fetched if s.text.strip()]
+    if not segments:
         return None
+    return {"language": getattr(fetched, "language_code", "") or "",
+            "duration": segments[-1]["end"],
+            "source": "captions",
+            "segments": segments}
 
 
 # ------------------------------------------------------------------ whisper
@@ -91,7 +120,8 @@ def whisper_transcribe(video_id: str, cfg: dict) -> dict:
     """yt-dlp -> ffmpeg -> (split) -> Whisper API -> stitched canonical dict."""
     with tempfile.TemporaryDirectory(prefix=f"vsk-{video_id}-") as tmp:
         raw = os.path.join(tmp, "raw.m4a")
-        run(["yt-dlp", "-f", "bestaudio", "-o", raw, "--no-playlist",
+        run([ytdlp_bin(), "-f", "bestaudio", "-o", raw, "--no-playlist",
+             *ytdlp_cookie_args(),
              f"https://www.youtube.com/watch?v={video_id}"])
         audio = os.path.join(tmp, "audio.ogg")
         run(["ffmpeg", "-y", "-i", raw, "-vn", "-ac", "1", "-ar", "16000",
@@ -186,13 +216,24 @@ def main():
         todo = todo[:args.limit]
     print(f"{len(videos)} videos in CSV; {len(todo)} to transcribe.", flush=True)
 
-    counts = {"captions": 0, "whisper": 0, "pending": 0, "failed": 0}
+    counts = {"captions": 0, "whisper": 0, "pending": 0, "failed": 0, "blocked": 0}
+    blocked_note = []
 
     def work(v):
         vid = v["video_id"]
         result = None
         if not args.whisper_only:
-            result = try_captions(vid)
+            try:
+                result = try_captions(vid)
+            except CaptionFetchBlocked as e:
+                if not blocked_note:
+                    blocked_note.append(str(e))
+                    print(f"  WARNING: caption fetch is being refused "
+                          f"({e}) — falling back to Whisper where configured. "
+                          f"This is usually an IP block, NOT missing captions.",
+                          flush=True)
+                if whisper_cfg is None or args.captions_only:
+                    raise
         if result is None and whisper_cfg is not None and not args.captions_only:
             result = whisper_transcribe(vid, whisper_cfg)
         return result
@@ -204,6 +245,13 @@ def main():
             vid = v["video_id"]
             try:
                 result = fut.result()
+            except CaptionFetchBlocked as e:
+                with lock:
+                    counts["blocked"] += 1
+                    state["videos"][vid] = {"status": "pending",
+                                            "note": f"caption fetch blocked: {e}"}
+                    save_state(state, args.state_file)
+                continue
             except Exception as e:
                 with lock:
                     counts["failed"] += 1

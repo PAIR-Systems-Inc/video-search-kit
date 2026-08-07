@@ -46,10 +46,25 @@ What goes in `.env` (details in `.env.example`):
 ```bash
 python pipeline/discover.py "https://www.youtube.com/@SomeChannel"
 # accepts @handle, channel URL/ID, or a playlist URL/ID
-# no YouTube API key? add --no-api (uses yt-dlp)
 ```
 
 Writes `data/videos.csv`: `video_id,title,published_at,url,duration,description`.
+
+There are **two modes**:
+
+| | **API mode** (default) | **`--no-api` mode** |
+|---|---|---|
+| Requirement | free `YOUTUBE_API_KEY` ([get one](https://console.cloud.google.com/apis/library/youtube.googleapis.com)) | nothing (uses yt-dlp) |
+| Publish dates | ✅ | ❌ empty |
+| Durations | ✅ (feeds the `--estimate` cost preview) | usually ❌ |
+| Descriptions | ✅ | ❌ |
+| Reliability | official API, stable | scraping-based — can break when YouTube changes, and heavy use may get rate-limited/blocked |
+| Speed | fast (1 quota unit per 50 videos) | slower on large channels |
+
+`--no-api` limitations in practice: cards render without dates, `transcribe.py
+--estimate` can't compute audio hours or Whisper cost (no durations), and it's
+the first thing to break when YouTube changes their pages. It's the
+quick-start path; use API mode for anything you'll run repeatedly.
 
 ## 2. Transcribe — videos ➜ timestamped transcripts
 
@@ -59,8 +74,12 @@ python pipeline/transcribe.py                # captions first, Whisper fallback
 ```
 
 - **Captions first** (free, instant) for videos that have them; **Whisper** for
-  the rest via any OpenAI-compatible endpoint (OpenAI, Groq, …) using *your*
-  key. `--whisper-only` / `--captions-only` narrow it.
+  the rest using *your* key. **A plain OpenAI API key works as-is** — the
+  defaults already target OpenAI's `whisper-1`; just set `WHISPER_API_KEY=sk-...`.
+  Any other OpenAI-compatible endpoint works too (e.g. Groq: set
+  `WHISPER_BASE_URL=https://api.groq.com/openai/v1`,
+  `WHISPER_MODEL=whisper-large-v3-turbo`). `--whisper-only` / `--captions-only`
+  narrow the behaviour.
 - The Whisper path needs `yt-dlp` and `ffmpeg` on PATH. Long audio is split
   into 20-minute pieces (the API caps uploads at 25 MB) and the timestamps are
   stitched back together.
