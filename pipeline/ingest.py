@@ -176,7 +176,8 @@ def main():
     from goodmem.api.memories import MemoryCreationRequest
 
     n_videos = n_chunks = 0
-    with Goodmem(base_url=base_url, api_key=api_key, timeout=120.0) as client:
+    verify = os.environ.get("GOODMEM_TLS_VERIFY", "1") != "0"
+    with Goodmem(base_url=base_url, api_key=api_key, timeout=120.0, verify=verify) as client:
 
         def send_batches(pairs, space_id, vid, prev):
             """Send (content, metadata) pairs; resume from prev checkpoint."""

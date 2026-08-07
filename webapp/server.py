@@ -41,6 +41,8 @@ from pydantic import BaseModel
 
 GOODMEM_BASE_URL = os.environ.get("GOODMEM_BASE_URL", "http://localhost:8080")
 GOODMEM_API_KEY = os.environ.get("GOODMEM_API_KEY", "")
+# Set GOODMEM_TLS_VERIFY=0 for local instances with self-signed certificates.
+GOODMEM_TLS_VERIFY = os.environ.get("GOODMEM_TLS_VERIFY", "1") != "0"
 GOODMEM_SPACE_ID = os.environ.get("GOODMEM_SPACE_ID", "")
 GOODMEM_TITLE_SPACE_ID = os.environ.get("GOODMEM_TITLE_SPACE_ID", "")
 TITLE_WEIGHT = float(os.environ.get("TITLE_WEIGHT", "0.6"))
@@ -259,7 +261,8 @@ def _retrieve(q: str, k: int, space_id: str, use_reranker: bool = False):
     else:
         kwargs.update(requested_size=k)
     try:
-        with Goodmem(base_url=GOODMEM_BASE_URL, api_key=GOODMEM_API_KEY, timeout=60.0) as client:
+        with Goodmem(base_url=GOODMEM_BASE_URL, api_key=GOODMEM_API_KEY,
+                     timeout=60.0, verify=GOODMEM_TLS_VERIFY) as client:
             events = client.memories.retrieve(**kwargs)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"GoodMem retrieval failed: {e}")

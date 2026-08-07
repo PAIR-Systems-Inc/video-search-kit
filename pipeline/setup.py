@@ -61,7 +61,8 @@ def main():
     reranker_model = os.environ.get("RERANKER_MODEL", "").strip()
     reranker_key = os.environ.get("RERANKER_API_KEY", "").strip()
 
-    with Goodmem(base_url=base_url, api_key=api_key, timeout=60.0) as client:
+    verify = os.environ.get("GOODMEM_TLS_VERIFY", "1") != "0"
+    with Goodmem(base_url=base_url, api_key=api_key, timeout=60.0, verify=verify) as client:
         # --- embedder (reuse an existing registration of the same model) ----
         embedder_id = None
         for e in client.embedders.list():
