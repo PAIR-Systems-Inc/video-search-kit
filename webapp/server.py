@@ -371,9 +371,26 @@ def _fused_search(q: str):
         body = body_f.result()
         titles = title_f.result() if title_f else []
 
+
+    def _scale_is_reranked(results):
+        """
+        Trust the DATA, not the request: some server versions silently skip
+        the reranker above a pool-size cap and return raw vector scores.
+        Reranker scores are calibrated [0,1]; pgvector similarity scores are
+        negative inner products — the sign of the first score tells which
+        scale actually came back.
+        """
+        for r in results:
+            if r.get("score") is not None:
+                return r["score"] >= 0
+        return False
+
+    body_reranked = rerank and _scale_is_reranked(body)
+    titles_reranked = rerank and _scale_is_reranked(titles)
+
     title_sim = {}
     for r in titles:
-        sim = _abs_sim(r["score"], rerank)
+        sim = _abs_sim(r["score"], titles_reranked)
         if sim >= TITLE_SIM_FLOOR:
             title_sim[r["video_id"]] = max(title_sim.get(r["video_id"], 0.0), sim)
 
@@ -386,7 +403,7 @@ def _fused_search(q: str):
         return r
 
     for r in body:
-        annotate(r, rerank)
+        annotate(r, body_reranked)
         r["source"] = "reranker" if rerank else "embedder"
 
     # Local exact-keyword index runs BEFORE the threshold cut: any chunk with
@@ -412,7 +429,7 @@ def _fused_search(q: str):
 
     # Confidence gate: drop chunks that aren't genuinely relevant — UNLESS every
     # query term appears verbatim (keyword_match), which bypasses the floor.
-    floor = RELEVANCE_FLOOR if rerank else RELEVANCE_FLOOR_NORERANK
+    floor = RELEVANCE_FLOOR if body_reranked else RELEVANCE_FLOOR_NORERANK
     body = [r for r in body
             if r["keyword_match"] or max(r["body_sim"], r["title_sim"]) >= floor]
     if not body:
